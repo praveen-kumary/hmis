@@ -1912,7 +1912,10 @@ public class PharmacySaleBhtController implements Serializable {
                 JsfUtil.addErrorMessage("Please edit the item quantity to save" + bi.getItem().getName());
                 return true;
             }
-
+            if (bi.getPharmaceuticalBillItem().getStock().getItemBatch().getRetailsaleRate() > 0 && bi.getRate() <= 0) {
+                JsfUtil.addErrorMessage("Rate for priced stock cannot be 0: " + (bi.getItem() != null ? bi.getItem().getName() : "item"));
+                return true;
+            }
         }
 
 //        if (checkAllBillItem()) {
@@ -1959,6 +1962,19 @@ public class PharmacySaleBhtController implements Serializable {
             return;
         }
 
+        for (BillItem bi : itemsToIssue) {
+            if (bi != null && bi.getPharmaceuticalBillItem() != null
+                    && bi.getPharmaceuticalBillItem().getStock() != null
+                    && bi.getPharmaceuticalBillItem().getStock().getItemBatch() != null) {
+                double batchRate = bi.getPharmaceuticalBillItem().getStock().getItemBatch().getRetailsaleRate();
+                if (batchRate > 0 && bi.getRate() <= 0) {
+                    JsfUtil.addErrorMessage("Cannot settle request: rate is 0 for priced stock "
+                            + (bi.getItem() != null ? bi.getItem().getName() : ""));
+                    return;
+                }
+            }
+        }
+
         Patient pt = getPatientEncounter().getPatient();
         getPreBill().setPaidAmount(0);
 
@@ -1993,6 +2009,19 @@ public class PharmacySaleBhtController implements Serializable {
         List<BillItem> itemsToIssue = getPreBill().getBillItems();
         if (hasAllergyConflicts(itemsToIssue)) {
             return;
+        }
+
+        for (BillItem bi : itemsToIssue) {
+            if (bi != null && bi.getPharmaceuticalBillItem() != null
+                    && bi.getPharmaceuticalBillItem().getStock() != null
+                    && bi.getPharmaceuticalBillItem().getStock().getItemBatch() != null) {
+                double batchRate = bi.getPharmaceuticalBillItem().getStock().getItemBatch().getRetailsaleRate();
+                if (batchRate > 0 && bi.getRate() <= 0) {
+                    JsfUtil.addErrorMessage("Cannot settle request: rate is 0 for priced stock "
+                            + (bi.getItem() != null ? bi.getItem().getName() : ""));
+                    return;
+                }
+            }
         }
 
         Patient pt = getPatientEncounter().getPatient();
@@ -2927,14 +2956,18 @@ public class PharmacySaleBhtController implements Serializable {
     private Department resolveMatrixDepartment() {
         // Read config once per prebill lifecycle (cleared on resetAll) rather than on every rate calc
         if (cachedMatrixByAdmissionDepartment == null) {
-            cachedMatrixByAdmissionDepartment = configOptionApplicationController.getBooleanValueByKey(
-                    "Price Matrix is calculated from Inpatient Department for "
-                    + sessionController.getDepartment().getName(), true);
+            if (configOptionApplicationController != null && sessionController != null && sessionController.getDepartment() != null) {
+                cachedMatrixByAdmissionDepartment = configOptionApplicationController.getBooleanValueByKey(
+                        "Price Matrix is calculated from Inpatient Department for "
+                        + sessionController.getDepartment().getName(), true);
+            } else {
+                cachedMatrixByAdmissionDepartment = true;
+            }
         }
 
         if (cachedMatrixByAdmissionDepartment) {
             if (getPatientEncounter() == null) {
-                return getSessionController().getDepartment();
+                return getSessionController() != null ? getSessionController().getDepartment() : null;
             }
             if (getPatientEncounter().getCurrentPatientRoom() == null) {
                 return getPatientEncounter().getDepartment();
@@ -2955,7 +2988,11 @@ public class PharmacySaleBhtController implements Serializable {
         if (selectedStockDto != null
                 && bi.getPharmaceuticalBillItem().getStock() != null
                 && Objects.equals(selectedStockDto.getId(), bi.getPharmaceuticalBillItem().getStock().getId())) {
-            calculateRates(bi, selectedStockDto.getRetailRate());
+            double rate = selectedStockDto.getRetailRate();
+            if (rate <= 0 && bi.getPharmaceuticalBillItem().getStock().getItemBatch() != null) {
+                rate = bi.getPharmaceuticalBillItem().getStock().getItemBatch().getRetailsaleRate();
+            }
+            calculateRates(bi, rate);
             return;
         }
 
@@ -2990,7 +3027,7 @@ public class PharmacySaleBhtController implements Serializable {
 
         PriceMatrix priceMatrix = null;
         // Discharge medicines are issued without the inward price matrix (no service charge).
-        if (!dischargeIssueMode && bi.getItem() != null) {
+        if (!dischargeIssueMode && bi.getItem() != null && getPriceMatrixController() != null) {
             priceMatrix = getPriceMatrixController().fetchInwardMargin(
                     bi,
                     estimatedValueBeforeAddingMarginToCalculateMatrix,
@@ -3044,7 +3081,7 @@ public class PharmacySaleBhtController implements Serializable {
 
         PriceMatrix priceMatrix = null;
         // Discharge medicines are issued without the inward price matrix (no service charge).
-        if (!dischargeIssueMode && bi.getItem() != null) {
+        if (!dischargeIssueMode && bi.getItem() != null && getPriceMatrixController() != null) {
             priceMatrix = getPriceMatrixController().fetchInwardMargin(bi, estimatedValue, matrixDept, paymentMethod, null,
                     getPatientEncounter() != null ? getPatientEncounter().getAdmissionType() : null, resolveCurrentRoomCategory(getPatientEncounter()));
         }
